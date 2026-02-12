@@ -5,7 +5,9 @@ import { sequelize } from './models';
 import dotenv from 'dotenv';
 
 // Load environment variables
-dotenv.config();
+const envFile = process.env.NODE_ENV === 'production' ? '.env.production' : '.env.development';
+dotenv.config({ path: envFile });
+console.log(`Loaded environment config from ${envFile}`);
 
 const PORT = process.env.PORT || 3000;
 
