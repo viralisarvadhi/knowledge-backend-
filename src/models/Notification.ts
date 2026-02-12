@@ -10,6 +10,8 @@ class Notification extends Model {
     public isRead!: boolean;
     public type!: string;
     public deletedAt!: Date | null;
+    public readonly createdAt!: Date;
+    public readonly updatedAt!: Date;
 }
 
 Notification.init({

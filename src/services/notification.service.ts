@@ -64,11 +64,23 @@ export const sendToUser = async (userId: string, title: string, body: string, da
             isRead: false
         });
 
+        // 3. Emit Socket Event for Real-time Badge Update
+        try {
+            const { getIO } = require('../config/socket'); // Lazy load to avoid circular dependency
+            getIO().to(`user_${userId}`).emit('notification_received', {
+                title,
+                body,
+                data
+            });
+        } catch (e) {
+            console.warn('Socket.io emit failed', e);
+        }
+
         if (registrationTokens.length === 0) {
             return; // Just save to DB if no token
         }
 
-        // 3. Send Message
+        // 4. Send Message (FCM)
         const message: admin.messaging.MulticastMessage = {
             notification: { title, body },
             data,

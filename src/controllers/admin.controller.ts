@@ -141,10 +141,16 @@ export const approveSolution = async (req: Request, res: Response, next: NextFun
         let totalCredits = creator?.totalCredits || 0;
 
         if (creator) {
-            // Pass the transaction to ensure atomicity
-            const result = await awardCreditsForResolution(creator.id, creator.role, transaction);
-            creditsAwarded = result.creditsAwarded;
-            totalCredits = result.totalCredits;
+            // Check if solution creator is the same as ticket creator
+            if (ticket && ticket.traineeId === creator.id) {
+                // Self-solved ticket: No credits awarded
+                creditsAwarded = 0;
+            } else {
+                // Pass the transaction to ensure atomicity
+                const result = await awardCreditsForResolution(creator.id, creator.role, transaction);
+                creditsAwarded = result.creditsAwarded;
+                totalCredits = result.totalCredits;
+            }
         }
 
         await transaction.commit();
@@ -160,8 +166,33 @@ export const approveSolution = async (req: Request, res: Response, next: NextFun
                     ticket // Send ticket to update status
                 });
                 getIO().emit('ticket_updated', ticket); // Broadcast status change
+
+                // Send Push Notification to Solution Creator
+                const { sendToUser } = await import('../services/notification.service');
+                const isOwnTicket = ticket?.traineeId === creator.id;
+                const rewardMessage = isOwnTicket
+                    ? `Your solution for "${ticket?.title}" has been approved. (No coins for self-solved tickets)`
+                    : `Your solution for "${ticket?.title}" has been approved. You earned +10 Coins!`;
+
+                await sendToUser(
+                    creator.id,
+                    'Solution Approved! 🌟',
+                    rewardMessage,
+                    { ticketId: ticket?.id, type: 'solution_approved' }
+                );
+
+                // Notify Ticket Creator that ticket is resolved
+                if (ticket && ticket.traineeId !== creator.id) {
+                    await sendToUser(
+                        ticket.traineeId,
+                        'Ticket Resolved ✅',
+                        `Your ticket "${ticket.title}" is now resolved. Please check the solution.`,
+                        { ticketId: ticket.id, type: 'ticket_resolved' }
+                    );
+                }
+
             } catch (error) {
-                console.warn('Failed to emit solution_approved socket event');
+                console.warn('Failed to emit solution_approved socket event or send notification', error);
             }
         }
 
@@ -216,8 +247,18 @@ export const rejectSolution = async (req: Request, res: Response, next: NextFunc
         try {
             const { getIO } = await import('../config/socket');
             getIO().emit('ticket_reopened', ticket);
+
+            // Send Push Notification
+            const { sendToUser } = await import('../services/notification.service');
+            await sendToUser(
+                solution.createdBy,
+                'Solution Rejected',
+                `Your solution for "${ticket?.title}" was rejected. Please review and try again.`,
+                { ticketId: ticket?.id, type: 'solution_rejected' }
+            );
+
         } catch (e) {
-            console.warn('Socket.io notification failed for ticket_reopened');
+            console.warn('Socket.io notification failed for ticket_reopened', e);
         }
 
         res.json({ message: 'Solution rejected and ticket reopened', solution });

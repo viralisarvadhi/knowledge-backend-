@@ -77,10 +77,11 @@ export const redeemTicket = async (req: Request, res: Response, next: NextFuncti
                 return res.status(403).json({ message: 'Ticket already redeemed by another user' });
             }
 
-            if (ticket.traineeId === userId && userRole !== 'admin') {
-                await transaction.rollback();
-                return res.status(403).json({ message: 'You cannot redeem your own ticket' });
-            }
+            // Removed check: Creator CAN redeem their own ticket now.
+            // if (ticket.traineeId === userId && userRole !== 'admin') {
+            //     await transaction.rollback();
+            //     return res.status(403).json({ message: 'You cannot redeem your own ticket' });
+            // }
 
             ticket.redeemedBy = userId;
             ticket.status = 'in-progress';
@@ -259,8 +260,20 @@ export const resolveWithExistingSolution = async (req: Request, res: Response, n
                     creditsAwarded: creatorAward.creditsAwarded,
                     totalCredits: creatorAward.totalCredits
                 });
+
+                // Send Push Notification
+                const { sendToUser } = await import('../services/notification.service');
+                if (ticket.traineeId !== userId) {
+                    await sendToUser(
+                        ticket.traineeId,
+                        'Ticket Resolved ✅',
+                        `Your ticket "${ticket.title}" is now resolved. Please check the solution.`,
+                        { ticketId: ticket.id, type: 'ticket_resolved' }
+                    );
+                }
+
             } catch (e) {
-                console.warn('Socket.io notification failed');
+                console.warn('Socket.io notification failed', e);
             }
 
             res.json({
