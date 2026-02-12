@@ -49,6 +49,31 @@ export const searchSolutions = async (req: Request, res: Response, next: NextFun
     }
 };
 
+export const getRecentSolutions = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const limit = parseInt(req.query.limit as string) || 10;
+
+        const solutions = await Solution.findAll({
+            where: {
+                isActive: true,
+            },
+            include: [
+                {
+                    model: Ticket,
+                    as: 'ticket',
+                    attributes: ['id', 'title', 'description', 'attachments'],
+                }
+            ],
+            order: [['createdAt', 'DESC']],
+            limit,
+        });
+
+        res.json(solutions);
+    } catch (error) {
+        next(error);
+    }
+};
+
 export const incrementReuseCount = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const { id } = req.params;
