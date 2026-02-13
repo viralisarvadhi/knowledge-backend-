@@ -21,18 +21,20 @@ Imagine a **Help Desk Center**:
 ## 📊 Visual Diagrams
 
 ### 1. Entity Relationship Diagram (The Structure)
+
 Shows how the "Forms" (Tables) are linked.
 
 ```mermaid
 erDiagram
     Users ||--o{ Tickets : "Created By (Trainee)"
     Users ||--o{ Tickets : "Solved By (Redeemer)"
+    Users ||--o{ Coupons : "Earned By"
     Tickets ||--o| Solutions : "Has Fix"
     
     Users {
         string Name
         string Email
-        int Credits
+        int totalCredits
     }
     Tickets {
         string Title
@@ -43,17 +45,25 @@ erDiagram
         text FixSteps
         enum Status
     }
+    Coupons {
+        string Code
+        int Amount
+        enum Status
+    }
 ```
 
 ### 2. Status Lifecycle (The Flow)
+
 Shows the journey of a single Ticket.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Open: Trainee Posts Ticket
     Open --> InProgress: Helper Redeems Ticket
-    InProgress --> Resolved: Admin Approves Solution
-    InProgress --> Open: Admin Rejects Solution
+    InProgress --> Pending: Solution Submitted
+    Pending --> Resolved: Admin Approves
+    Pending --> Reopened: Admin Rejects
+    Reopened --> InProgress: Helper Retries
     Resolved --> [*]: Ticket Closed
 ```
 
@@ -70,7 +80,7 @@ Stores everyone who can log in.
 | `name` | String | The person's display name. |
 | `email` | String | Used for login and notifications. **Must be unique**. |
 | `role` | Enum | `'trainee'` (Can create/solve) or `'admin'` (Can approve). |
-| `totalCredits` | Int | Scorecard! +10 points for every approved solution. |
+| `totalCredits` | Int | Scorecard! Points earned from solving tickets. Can be converted to Coupons. |
 | `avatar` | String | Filename of their profile picture (e.g., `user-123.jpg`). |
 
 **Example Row:**
@@ -80,7 +90,7 @@ Stores everyone who can log in.
   "name": "Alice Developer",
   "email": "alice@example.com",
   "role": "trainee",
-  "totalCredits": 50
+  "totalCredits": 550
 }
 ```
 
@@ -94,7 +104,7 @@ Stores the actual work items.
 | `id` | UUID | Unique ID for the ticket. |
 | `title` | String | "Login is broken" (Short summary). |
 | `description` | Text | "When I click login, nothing happens..." (Full details). |
-| `status` | Enum | `'open'` (No one has it), `'in-progress'` (Being worked on), `'resolved'` (Done). |
+| `status` | Enum | `'open'`, `'in-progress'`, `'resolved'`, `'rejected'`, `'reopened'`. |
 | `traineeId` | UUID | **Foreign Key**: Links to `Users.id`. Who created this? |
 | `redeemedBy` | UUID | **Foreign Key**: Links to `Users.id`. Who is working on it? (NULL if open). |
 | `reusedSolutionId` | UUID | **Foreign Key**: If they used an existing answer, which one? |
@@ -138,7 +148,21 @@ Stores the proposed fixes. This builds up the Knowledge Base.
 
 ---
 
-### 4. `Notifications` Table (The Alerts)
+### 4. `Coupons` Table (The Rewards)
+Stores dummy coupons generated from credits.
+
+| Column | Type | Why? (Description) |
+| :--- | :--- | :--- |
+| `id` | UUID | Unique ID for the coupon. |
+| `userId` | UUID | **Foreign Key**: Links to `Users.id`. Who owns this? |
+| `code` | String | Unique coupon code (e.g., `REWARD-1234`). |
+| `amount` | Int | Value in Rupees (e.g., `10`). |
+| `status` | Enum | `'active'` (Ready to use), `'used'`, `'expired'`. |
+| `expiryDate` | Date | When the coupon becomes invalid. |
+
+---
+
+### 5. `Notifications` Table (The Alerts)
 Stores history of "Ding!" messages sent to users.
 
 | Column | Type | Why? (Description) |
@@ -150,7 +174,7 @@ Stores history of "Ding!" messages sent to users.
 
 ---
 
-### 5. `DeviceTokens` Table (The Phones)
+### 6. `DeviceTokens` Table (The Phones)
 Stores the address to send Push Notifications to.
 
 | Column | Type | Why? (Description) |

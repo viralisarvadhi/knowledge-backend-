@@ -137,9 +137,11 @@ Track that a solution was helpful.
 
 ### Get Pending Solutions
 List solutions waiting for approval.
-- **URL**: `/admin/solutions/pending`
-- **Method**: `GET`
-- **Response**: `200 OK`
+- **URL**: `/admin/solutions/p### User Profile Management
+
+-   **Get My Profile**
+    -   `GET /auth/me`
+    -   Response: `200 OK`
 
 ### Approve Solution
 Approve a solution, resolve the ticket, and award credits.
@@ -227,3 +229,28 @@ Delete profile picture.
 - **URL**: `/users/avatar`
 - **Method**: `DELETE`
 - **Response**: `200 OK`
+
+---
+
+## 💰 Credits & Rewards
+*All-   **Amount**: Integer (e.g., 10, 20)
+-   **Code**: String (e.g., "ABCD-1234")
+
+#### 1. Get My Coupons
+Fetch all coupons earned by the user.
+- **URL**: `/credits/coupons`
+- **Method**: `GET`
+-   Returns: `200 OK` with `coupons: Coupon[]`.
+
+#### 2. Convert Credits to Coupon
+Redeem 50 credits for a ₹10 coupon.
+- **URL**: `/credits/convert`
+- **Method**: `POST`
+- **Response**: `200 OK`
+  ```json
+  {
+    "message": "Successfully converted 50 credits to a ₹10 coupon!",
+    "coupon": { ... },
+    "totalCredits": 450
+  }
+  ```

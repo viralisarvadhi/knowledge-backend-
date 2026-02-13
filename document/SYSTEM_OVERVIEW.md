@@ -55,7 +55,10 @@ Defines the structure of the database tables.
 -   **`DeviceToken.ts`**:
     -   Columns: `id`, `userId`, `token`.
     -   Logic: Stores Expo Push Tokens for sending notifications to phones.
--   **`index.ts`**: Initializes associations (e.g., "User has many Tickets").
+-   **`Coupon.ts`**:
+    -   Columns: `id`, `userId`, `amount`, `code`, `status`, `expiryDate`.
+    -   Logic: Stores rewards earned by users from converting credits.
+-   **`index.ts`**: Initializes associations (e.g., "User has many Tickets", "User has many Coupons").
 
 ### 📂 `src/controllers/` (Business Logic)
 Handles incoming requests and returns responses.
@@ -69,6 +72,9 @@ Handles incoming requests and returns responses.
     -   `approveSolution`: Admin approves a solution (credits user, resolves ticket).
     -   `rejectSolution`: Admin rejects a solution (reopens ticket).
 -   **`notification.controller.ts`**: Fetches user notifications.
+-   **`credit.controller.ts`**:
+    -   `getCoupons`: List user's earned rewards.
+    -   `convertCredits`: Transaction logic for converting 50 credits -> ₹10 coupon.
 -   **`admin.controller.ts`**: Admin-specific actions (e.g., viewing pending approvals).
 
 ### 📂 `src/routes/` (API Endpoints)
@@ -78,6 +84,7 @@ Maps URLs to Controllers.
     -   `POST /tickets` -> `createTicket`
     -   `PUT /tickets/:id/redeem` -> `redeemTicket`
 -   **`solution.routes.ts`**: `POST /solutions`, `PUT /solutions/:id/approve`.
+-   **`credit.routes.ts`**: `GET /credits/coupons`, `POST /credits/convert`.
 -   **`notification.routes.ts`**: `GET /notifications`.
 -   **`admin.routes.ts`**: Routes for admin dashboard (e.g., `GET /admin/stats`).
 
@@ -97,7 +104,9 @@ Runs before the controller.
 Files here describe changes to the database structure over time (e.g., "Create Users Table", "Add Avatar Column").
 
 ### 📂 `src/scripts/` (Utilities)
-Standalone scripts for maintenance or testing.
--   **`check-notifications.ts`**: Debug script to test notification sending.
--   **`verify-models.ts`**: Checks if DB tables match the Models.
+Organized standalone scripts for maintenance, fixing data, or testing.
+-   **`fix_self_solved.ts`**: Auto-approves tickets where the creator is also the solver.
+-   **`check_all_tickets.ts`**: Generates a status report of all tickets and solutions.
 -   **`resync-credits.ts`**: Recalculates user credits based on approved solutions.
+-   **`verify-models.ts`**: Checks if DB tables match the Models.
+-   **`check-notifications.ts`**: Debug script to test notification sending.

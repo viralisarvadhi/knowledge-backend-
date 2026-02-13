@@ -95,10 +95,41 @@ Some parts of the app (like creating tickets) are private. When a user tries to 
 #### B. Rejecting (`PATCH /admin/solutions/:id/reject`)
 1.  **Transaction**:
     -   `UPDATE Solutions SET status='rejected'`.
-    -   `UPDATE Tickets SET status='open', redeemedBy=NULL`.
+    -   `UPDATE Tickets SET status='reopened', redeemedBy=NULL`.
 2.  **Notifications**: Tell Solver "Solution Rejected".
 3.  **Socket**: Update UI (Orange card).
 
+---
+
+## 5. Rewards Workflow 💰
+
+### Simple Explanation
+**Conversion**: When a user earns enough credits (50), they can trade them for a real reward (₹10 Coupon). We deduct their points and give them a unique code they can use later.
+
+### Deep Dive (Technical)
+1.  **Request**: `POST /credits/convert`.
+2.  **Validate**: Does `User.totalCredits >= 50`?
+3.  **Transaction**:
+    -   `UPDATE Users SET totalCredits = totalCredits - 50`.
+    -   `INSERT INTO Coupons (code, amount=10, status='active', expiryDate=30_days_later)`.
+4.  **Socket**: `socket.emit('credit_updated')` -> Updates UI balance.
+5.  **Response**: `200 OK` with Coupon details.
+
+---
+
+## 6. Self-Solve Workflow 🛠️
+
+### Simple Explanation
+A Trainee can solve their own ticket. In this case, the system trusts them automatically. The ticket closes immediately, but they get 0 credits (since it's their own problem).
+
+### Deep Dive (Technical)
+1.  **Submit**: Trainee calls `/tickets/:id/resolve` on their own ticket.
+2.  **Detection**: Backend checks if `ticket.traineeId == solution.createdBy`.
+3.  **Auto-Process**:
+    -   Sets Solution status to `'approved'`.
+    -   Sets Ticket status to `'resolved'`.
+    -   Awards **0** credits.
+4.  **Response**: `200 OK` (Processed).
 ---
 
 ## 5. Notification Workflow 🔔
