@@ -4,6 +4,7 @@ import Ticket from './Ticket';
 import Solution from './Solution';
 import DeviceToken from './DeviceToken';
 import Notification from './Notification';
+import Coupon from './Coupon';
 
 // User <-> Ticket (Trainee)
 User.hasMany(Ticket, { as: 'ticketsAsTrainee', foreignKey: 'traineeId' });
@@ -32,6 +33,10 @@ DeviceToken.belongsTo(User, { foreignKey: 'userId' });
 User.hasMany(Notification, { foreignKey: 'userId', onDelete: 'CASCADE' });
 Notification.belongsTo(User, { foreignKey: 'userId' });
 
+// User <-> Coupon
+User.hasMany(Coupon, { foreignKey: 'userId', onDelete: 'CASCADE' });
+Coupon.belongsTo(User, { foreignKey: 'userId' });
+
 export {
     sequelize,
     User,
@@ -39,4 +44,5 @@ export {
     Solution,
     DeviceToken,
     Notification,
+    Coupon,
 };

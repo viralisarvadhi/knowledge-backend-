@@ -24,6 +24,7 @@ app.use('/api/tickets', ticketRoutes);
 app.use('/api/solutions', solutionRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/credits', require('./routes/credit.routes').default);
 app.use('/api/notifications', require('./routes/notification.routes').default);
 
 // Error handling

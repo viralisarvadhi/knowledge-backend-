@@ -67,7 +67,7 @@ export const redeemTicket = async (req: Request, res: Response, next: NextFuncti
                 return res.status(404).json({ message: 'Ticket not found' });
             }
 
-            if (ticket.status !== 'open') {
+            if (ticket.status !== 'open' && ticket.status !== 'reopened') {
                 await transaction.rollback();
                 return res.status(400).json({ message: 'Ticket is not open for redemption' });
             }
@@ -139,6 +139,8 @@ export const resolveTicket = async (req: Request, res: Response, next: NextFunct
             let solution = null;
             const attachments = (req as any).files?.map((f: any) => `/uploads/${f.filename}`) || [];
 
+            const isSelfSolved = String(ticket.traineeId) === String(userId);
+
             if (rootCause && fixSteps) {
                 const { Solution } = await import('../models');
                 solution = await Solution.create({
@@ -150,23 +152,43 @@ export const resolveTicket = async (req: Request, res: Response, next: NextFunct
                     reuseCount: 0,
                     createdBy: userId,
                     isActive: true,
-                    status: 'pending',
+                    status: isSelfSolved ? 'approved' : 'pending',
                     attachments
                 }, { transaction });
             }
 
-            // ticket.status = 'resolved'; // Keep status 'in-progress' until admin approval
+            if (isSelfSolved) {
+                ticket.status = 'resolved';
+            }
             await ticket.save({ transaction });
 
             await transaction.commit();
 
             try {
                 getIO().emit('ticket_resolved', { ticket, solution });
+                if (isSelfSolved) {
+                    getIO().emit('ticket_updated', ticket);
+                }
+
+                // Send Push Notification to Ticket Creator (if not self-solved)
+                const { sendToUser } = await import('../services/notification.service');
+                if (!isSelfSolved) {
+                    await sendToUser(
+                        ticket.traineeId,
+                        'Solution Submitted 🚀',
+                        `A solution has been submitted for your ticket "${ticket.title}". Please review it.`,
+                        { ticketId: ticket.id, type: 'solution_submitted' }
+                    );
+                }
             } catch (e) {
-                console.warn('Socket.io not initialized, skipping emit');
+                console.warn('Socket.io or Notification failed', e);
             }
 
-            res.json({ message: 'Ticket resolved. Solution pending admin approval.', ticket, solution });
+            const message = isSelfSolved
+                ? 'Ticket resolved and solution published to Knowledge Base.'
+                : 'Ticket resolved. Solution pending creator review.';
+
+            res.json({ message, ticket, solution });
         } catch (error) {
             await transaction.rollback();
             throw error;
@@ -233,11 +255,26 @@ export const resolveWithExistingSolution = async (req: Request, res: Response, n
             solution.reuseCount += 1;
             await solution.save({ transaction });
 
-            // 5. Award credits to redeemer (10)
-            const redeemerAward = await awardCreditsForResolution(userId, userRole, transaction);
+            // 5. Award credits to redeemer (10, or 0 if self-solved)
+            let redeemerAward = { creditsAwarded: 0, totalCredits: 0 };
+            const isSelfSolved = ticket.traineeId === userId;
 
-            // 6. Award credits to solution creator (5)
-            const creatorAward = await awardCreditsForReuse(solution.createdBy, transaction);
+            if (isSelfSolved) {
+                // Self-solved: 0 credits, and ensure ticket is resolved (already set above)
+                const redeemer = await User.findByPk(userId, { transaction });
+                redeemerAward = { creditsAwarded: 0, totalCredits: redeemer?.totalCredits || 0 };
+            } else {
+                redeemerAward = await awardCreditsForResolution(userId, userRole, transaction);
+            }
+
+            // 6. Award credits to solution creator (5, skip if solution creator is the same as redeemer who already got 0)
+            let creatorAward = { creditsAwarded: 0, totalCredits: 0 };
+            if (solution.createdBy === userId && isSelfSolved) {
+                const creator = await User.findByPk(solution.createdBy, { transaction });
+                creatorAward = { creditsAwarded: 0, totalCredits: creator?.totalCredits || 0 };
+            } else {
+                creatorAward = await awardCreditsForReuse(solution.createdBy, transaction);
+            }
 
             await transaction.commit();
 
@@ -325,7 +362,7 @@ export const getTickets = async (req: Request, res: Response, next: NextFunction
                 // Use 'solutions' (plural) to get all, then we pick the latest
                 {
                     association: 'solutions',
-                    attributes: ['id', 'status', 'rootCause', 'fixSteps', 'preventionNotes', 'createdBy', 'createdAt'],
+                    attributes: ['id', 'status', 'rootCause', 'fixSteps', 'preventionNotes', 'attachments', 'createdBy', 'createdAt'],
                 }
             ],
             order: [
@@ -354,7 +391,8 @@ export const getTickets = async (req: Request, res: Response, next: NextFunction
                     // valid to show status, but hide content
                     rootCause: null,
                     fixSteps: null,
-                    preventionNotes: null
+                    preventionNotes: null,
+                    attachments: null
                 };
             }
             return ticket;
@@ -394,6 +432,59 @@ export const deleteTicket = async (req: Request, res: Response, next: NextFuncti
         }
 
         res.json({ message: 'Ticket deleted', ticket: deletedTicket });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const getTicketById = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { id } = req.params;
+        const { role, id: userId } = (req as AuthenticatedRequest).user!;
+
+        const { Ticket, Solution } = await import('../models');
+
+        const t = await Ticket.findByPk(id as string, {
+            paranoid: false,
+            include: [
+                { association: 'trainee', attributes: ['id', 'name', 'email'] },
+                { association: 'redeemer', attributes: ['id', 'name', 'email'] },
+                {
+                    association: 'solutions',
+                    attributes: ['id', 'status', 'rootCause', 'fixSteps', 'preventionNotes', 'attachments', 'createdBy', 'createdAt'],
+                }
+            ],
+            order: [
+                [{ model: Solution, as: 'solutions' }, 'createdAt', 'DESC']
+            ]
+        });
+
+        if (!t) {
+            return res.status(404).json({ message: 'Ticket not found' });
+        }
+
+        const ticket = t.toJSON() as any;
+
+        // Set ticket.solution to the latest solution
+        if (ticket.solutions && ticket.solutions.length > 0) {
+            ticket.solution = ticket.solutions[0];
+        }
+        delete ticket.solutions;
+
+        // Sanitize
+        if (ticket.solution && ticket.solution.status !== 'approved' && role !== 'admin' && ticket.traineeId !== userId && ticket.redeemedBy !== userId) {
+            ticket.solution = {
+                id: ticket.solution.id,
+                status: ticket.solution.status,
+                createdBy: ticket.solution.createdBy,
+                rootCause: null,
+                fixSteps: null,
+                preventionNotes: null,
+                attachments: null
+            };
+        }
+
+        res.json(ticket);
     } catch (error) {
         next(error);
     }

@@ -5,7 +5,7 @@ export interface TicketAttributes {
     id: string;
     title: string;
     description: string;
-    status: 'open' | 'in-progress' | 'resolved';
+    status: 'open' | 'in-progress' | 'resolved' | 'rejected' | 'reopened';
     traineeId: string;
     redeemedBy?: string | null;
     reusedSolutionId?: string | null;
@@ -21,13 +21,14 @@ class Ticket extends Model<TicketAttributes, TicketCreationAttributes> implement
     public id!: string;
     public title!: string;
     public description!: string;
-    public status!: 'open' | 'in-progress' | 'resolved';
+    public status!: 'open' | 'in-progress' | 'resolved' | 'rejected' | 'reopened';
     public traineeId!: string;
     public redeemedBy!: string | null;
     public reusedSolutionId!: string | null;
     public attachments!: string[];
     public readonly createdAt!: Date;
     public readonly updatedAt!: Date;
+    public readonly deletedAt?: Date;
 }
 
 Ticket.init(
@@ -46,7 +47,7 @@ Ticket.init(
             allowNull: false,
         },
         status: {
-            type: DataTypes.ENUM('open', 'in-progress', 'resolved'),
+            type: DataTypes.ENUM('open', 'in-progress', 'resolved', 'rejected', 'reopened'),
             allowNull: false,
             defaultValue: 'open',
         },

@@ -68,6 +68,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
                 name: user.name,
                 email: user.email,
                 role: user.role,
+                totalCredits: user.totalCredits || 0,
             },
             token,
         });
@@ -119,6 +120,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
                 name: user.name,
                 email: user.email,
                 role: user.role,
+                totalCredits: user.totalCredits || 0,
             },
             token,
         });

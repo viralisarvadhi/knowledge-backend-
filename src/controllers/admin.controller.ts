@@ -44,12 +44,16 @@ export const getTicketStats = async (req: Request, res: Response, next: NextFunc
         const open = await Ticket.count({ where: { status: 'open' } });
         const inProgress = await Ticket.count({ where: { status: 'in-progress' } });
         const resolved = await Ticket.count({ where: { status: 'resolved' } });
+        const rejected = await Ticket.count({ where: { status: 'rejected' } });
+        const reopened = await Ticket.count({ where: { status: 'reopened' } });
 
         res.json({
             totalTickets,
             open,
             inProgress,
-            resolved
+            resolved,
+            rejected,
+            reopened
         });
     } catch (error) {
         next(error);
@@ -78,13 +82,18 @@ export const disableSolution = async (req: Request, res: Response, next: NextFun
 export const getPendingSolutions = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const { Solution } = await import('../models');
+        const { Op } = require('sequelize');
         const solutions = await Solution.findAll({
-            where: { status: 'pending' },
+            where: {
+                status: {
+                    [Op.in]: ['pending', 'rejected']
+                }
+            },
             include: [
-                { association: 'ticket', attributes: ['id', 'title', 'description'] },
+                { association: 'ticket', attributes: ['id', 'title', 'description', 'status'] },
                 { association: 'creator', attributes: ['id', 'name', 'email'] }
             ],
-            order: [['createdAt', 'ASC']]
+            order: [['updatedAt', 'DESC']]
         });
         res.json(solutions);
     } catch (error) {
@@ -92,181 +101,7 @@ export const getPendingSolutions = async (req: Request, res: Response, next: Nex
     }
 };
 
-export const approveSolution = async (req: Request, res: Response, next: NextFunction) => {
-    const { id } = req.params;
-    const { Solution, Ticket, User, sequelize } = await import('../models');
-    const { awardCreditsForResolution } = (await import('../services/credit.service')) as any;
 
-    const transaction = await sequelize.transaction();
-
-    try {
-        // Lock the solution row for update
-        const solution = await Solution.findByPk(id as string, {
-            lock: transaction.LOCK.UPDATE,
-            transaction
-        });
-
-        if (!solution) {
-            await transaction.rollback();
-            return res.status(404).json({ message: 'Solution not found' });
-        }
-
-        if (solution.status !== 'pending') {
-            await transaction.rollback();
-            return res.status(400).json({ message: `Solution is already ${solution.status}` });
-        }
-
-        // 1. Update solution status
-        solution.status = 'approved';
-        await solution.save({ transaction });
-
-        // Update ticket status to resolved
-        const ticket = await Ticket.findByPk(solution.ticketId, {
-            lock: transaction.LOCK.UPDATE,
-            transaction
-        });
-
-        if (ticket) {
-            ticket.status = 'resolved';
-            await ticket.save({ transaction });
-        }
-
-        // 2. Award credits to the creator
-        const creator = await User.findByPk(solution.createdBy, {
-            lock: transaction.LOCK.UPDATE,
-            transaction
-        });
-
-        let creditsAwarded = 0;
-        let totalCredits = creator?.totalCredits || 0;
-
-        if (creator) {
-            // Check if solution creator is the same as ticket creator
-            if (ticket && ticket.traineeId === creator.id) {
-                // Self-solved ticket: No credits awarded
-                creditsAwarded = 0;
-            } else {
-                // Pass the transaction to ensure atomicity
-                const result = await awardCreditsForResolution(creator.id, creator.role, transaction);
-                creditsAwarded = result.creditsAwarded;
-                totalCredits = result.totalCredits;
-            }
-        }
-
-        await transaction.commit();
-
-        // 3. Notify the user via socket (after commit)
-        if (creator) {
-            try {
-                const { getIO } = await import('../config/socket');
-                getIO().to(`user_${creator.id}`).emit('solution_approved', {
-                    solutionId: solution.id,
-                    creditsAwarded,
-                    totalCredits,
-                    ticket // Send ticket to update status
-                });
-                getIO().emit('ticket_updated', ticket); // Broadcast status change
-
-                // Send Push Notification to Solution Creator
-                const { sendToUser } = await import('../services/notification.service');
-                const isOwnTicket = ticket?.traineeId === creator.id;
-                const rewardMessage = isOwnTicket
-                    ? `Your solution for "${ticket?.title}" has been approved. (No coins for self-solved tickets)`
-                    : `Your solution for "${ticket?.title}" has been approved. You earned +10 Coins!`;
-
-                await sendToUser(
-                    creator.id,
-                    'Solution Approved! 🌟',
-                    rewardMessage,
-                    { ticketId: ticket?.id, type: 'solution_approved' }
-                );
-
-                // Notify Ticket Creator that ticket is resolved
-                if (ticket && ticket.traineeId !== creator.id) {
-                    await sendToUser(
-                        ticket.traineeId,
-                        'Ticket Resolved ✅',
-                        `Your ticket "${ticket.title}" is now resolved. Please check the solution.`,
-                        { ticketId: ticket.id, type: 'ticket_resolved' }
-                    );
-                }
-
-            } catch (error) {
-                console.warn('Failed to emit solution_approved socket event or send notification', error);
-            }
-        }
-
-        res.json({ message: 'Solution approved and credits awarded', solution, creditsAwarded });
-    } catch (error) {
-        if (transaction) await transaction.rollback();
-        next(error);
-    }
-};
-
-export const rejectSolution = async (req: Request, res: Response, next: NextFunction) => {
-    const { id } = req.params;
-    const { Solution, Ticket, sequelize } = await import('../models');
-
-    const transaction = await sequelize.transaction();
-
-    try {
-        const solution = await Solution.findByPk(id as string, {
-            lock: transaction.LOCK.UPDATE,
-            transaction
-        });
-
-        if (!solution) {
-            await transaction.rollback();
-            return res.status(404).json({ message: 'Solution not found' });
-        }
-
-        if (solution.status !== 'pending') {
-            await transaction.rollback();
-            return res.status(400).json({ message: `Solution is already ${solution.status}` });
-        }
-
-        // 1. Update solution status
-        solution.status = 'rejected';
-        await solution.save({ transaction });
-
-        // 2. Revert ticket to open status
-        const ticket = await Ticket.findByPk(solution.ticketId, {
-            lock: transaction.LOCK.UPDATE,
-            transaction
-        });
-
-        if (ticket) {
-            ticket.status = 'open';
-            ticket.redeemedBy = null;
-            await ticket.save({ transaction });
-        }
-
-        await transaction.commit();
-
-        // 3. Notify via socket
-        try {
-            const { getIO } = await import('../config/socket');
-            getIO().emit('ticket_reopened', ticket);
-
-            // Send Push Notification
-            const { sendToUser } = await import('../services/notification.service');
-            await sendToUser(
-                solution.createdBy,
-                'Solution Rejected',
-                `Your solution for "${ticket?.title}" was rejected. Please review and try again.`,
-                { ticketId: ticket?.id, type: 'solution_rejected' }
-            );
-
-        } catch (e) {
-            console.warn('Socket.io notification failed for ticket_reopened', e);
-        }
-
-        res.json({ message: 'Solution rejected and ticket reopened', solution });
-    } catch (error) {
-        if (transaction) await transaction.rollback();
-        next(error);
-    }
-};
 
 export const deleteUser = async (req: Request, res: Response, next: NextFunction) => {
     const { id } = req.params;

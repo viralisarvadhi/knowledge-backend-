@@ -21,6 +21,7 @@ export const searchSolutions = async (req: Request, res: Response, next: NextFun
         const solutions = await Solution.findAll({
             where: {
                 isActive: true,
+                status: 'approved', // Only show approved solutions in knowledge base
                 [Op.or]: [
                     { rootCause: { [Op.iLike]: `%${q}%` } },
                     { fixSteps: { [Op.iLike]: `%${q}%` } },
@@ -56,6 +57,7 @@ export const getRecentSolutions = async (req: Request, res: Response, next: Next
         const solutions = await Solution.findAll({
             where: {
                 isActive: true,
+                status: 'approved', // Only show approved solutions in knowledge base
             },
             include: [
                 {
